@@ -14,6 +14,7 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.util.*;
+import java.util.stream.Collectors;
 
 public class Importer {
     private final RoomDuplicator extension;
@@ -75,26 +76,67 @@ public class Importer {
 
         Map<String, HPacket> packets = Utils.requestRoomEntryPackets(executor);
         if(packets.values().stream().noneMatch(Objects::nonNull) || packets.get("GetGuestRoomResult") == null || packets.get("RoomVisualizationSettings") == null) {
-            Logger.log(Color.RED, "Move Habbo in to a room to start an import!");
+            Logger.log(Color.RED, "No room data captured yet - walk out and back in to the room, then import again!");
             return;
         }
 
         Map<String, Exportable> currentStates = Utils.getLiveExportablesFromPackets(extension, packets);
-        List<Exportable> exportables = getExportablesFromJson(importingJson);
 
-        if(exportables.stream().map(Exportable::getClass).anyMatch(c -> c.equals(FloorPlan.class) || c.equals(FloorItems.class))) {
+        List<Exportable> exportables;
+        try {
+            exportables = getExportablesFromJson(importingJson);
+        } catch (Throwable t) {
+            t.printStackTrace();
+            Logger.log(Color.RED, "Import file could not be read: " + t);
+            return;
+        }
+
+        if(exportables.isEmpty()) {
+            Logger.log(Color.RED, "Nothing selected to import!");
+            return;
+        }
+
+        Set<Class<?>> selected = exportables.stream().map(Exportable::getClass).collect(Collectors.toSet());
+        boolean needsEjectall = selected.contains(FloorPlan.class) || selected.contains(FloorItems.class);
+        boolean needsInventory = selected.contains(FloorItems.class) || selected.contains(WallItems.class);
+
+        if((needsEjectall && currentStates.get("FloorPlan") == null)
+                || (selected.contains(FloorItems.class) && currentStates.get("FloorItems") == null)
+                || (selected.contains(WallItems.class) && currentStates.get("WallItems") == null)) {
+            Logger.log(Color.RED, "Target room not fully captured - walk out and back in to the room, then import again!");
+            return;
+        }
+
+        Inventory inv = Utils.requestInventory(executor);
+        if(inv == null && needsInventory) {
+            Logger.log(Color.RED, "Could not read your inventory - import stopped, the room was left untouched");
+            return;
+        }
+
+        if(needsEjectall) {
             if(!Utils.requestEjectall(executor)) {
                 Logger.log(Color.RED, "Ejectall rejected, import stopped!");
                 return;
             }
+
+            Inventory afterEjectall = Utils.requestInventory(executor);
+            if(afterEjectall != null) {
+                inv = afterEjectall;
+            } else if(needsInventory) {
+                Logger.log(Color.ORANGE, "Could not re-read the inventory after clearing the room - continuing with the earlier snapshot");
+            }
         }
 
-        Inventory inv = Utils.requestInventory(executor);
-
-        exportables.forEach(exportable -> {
-            exportable.doImport(executor, exportables, currentStates, inv, this::setProgress);
-            Logger.log(Color.SEAGREEN, exportable.getClass().getAnnotation(ExportableInfo.class).Name() + " imported!");
-        });
+        for(Exportable exportable : exportables) {
+            String name = exportable.getClass().getAnnotation(ExportableInfo.class).Name();
+            try {
+                exportable.doImport(executor, exportables, currentStates, inv, this::setProgress);
+                Logger.log(Color.SEAGREEN, name + " imported!");
+            } catch (Throwable t) {
+                t.printStackTrace();
+                Logger.log(Color.RED, name + " failed: " + t);
+            }
+        }
     }
 
     private List<Exportable> getExportablesFromJson(JSONObject importingJson) {
@@ -117,6 +159,6 @@ public class Importer {
     }
 
     public void setProgress(double p) {
-        this.extension.importProgress.setProgress(p);
+        javafx.application.Platform.runLater(() -> this.extension.importProgress.setProgress(p));
     }
 }

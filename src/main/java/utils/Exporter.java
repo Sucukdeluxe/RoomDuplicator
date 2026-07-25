@@ -52,7 +52,11 @@ public class Exporter {
         if(extension.exportFloorplan.isSelected()) {
             if(packetMap.getOrDefault("RoomEntryTile", null) != null
                     && packetMap.getOrDefault("FloorHeightMap", null) != null) {
-                exportables.add(new FloorPlan(packetMap.get("FloorHeightMap"), packetMap.get("RoomEntryTile")));
+                try {
+                    exportables.add(new FloorPlan(packetMap.get("FloorHeightMap"), packetMap.get("RoomEntryTile")));
+                } catch (Throwable t) {
+                    Logger.log(Color.RED, "Floorplan packets have an unexpected layout, floorplan skipped!");
+                }
             } else {
                 Logger.log(Color.RED, "Couldn't receive packets necessary for floorplan export, floorplan skipped!");
             }

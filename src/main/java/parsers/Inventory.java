@@ -5,7 +5,9 @@ import furnidata.FurniDataSearcher;
 import furnidata.FurniDataSearcher.FurniType;
 import gearth.extensions.parsers.HStuff;
 import gearth.protocol.HPacket;
+import javafx.scene.paint.Color;
 import utils.Executor;
+import utils.Logger;
 import utils.Utils;
 
 import java.util.ArrayList;
@@ -24,19 +26,28 @@ public class Inventory {
     }
 
     public Inventory(ProgressListener progressListener, HPacket ...furniListPackets) {
-        Arrays.stream(furniListPackets).parallel()
-                .forEach(furniListPacket -> {
-                    furniListPacket.setReadIndex(10);
-                    itemTotal += furniListPacket.readInteger();
-                    int n = furniListPacket.readInteger();
-                    for(int i = 0; i < n; i++) {
-                        InvItem invItem = new InvItem(furniListPacket);
-                        synchronized (lock) {
-                            invItems.add(invItem);
-                        }
+        int skipped = 0;
+        for(HPacket furniListPacket : furniListPackets) {
+            try {
+                furniListPacket.setReadIndex(10);
+                itemTotal += furniListPacket.readInteger();
+                int n = furniListPacket.readInteger();
+                for(int i = 0; i < n && i < 4096; i++) {
+                    InvItem invItem = new InvItem(furniListPacket);
+                    synchronized (lock) {
+                        invItems.add(invItem);
+                    }
+                    if(itemTotal > 0) {
                         progressListener.setProgress((double) invItems.size() / itemTotal);
                     }
-                });
+                }
+            } catch (Throwable t) {
+                skipped++;
+            }
+        }
+        if(skipped > 0) {
+            Logger.log(Color.ORANGE, "Inventory: " + skipped + " page(s) unreadable, continuing with " + invItems.size() + " item(s)");
+        }
     }
 
     public InvItem getItemByTypeId(int typeId, FurniType furniType) {
@@ -55,14 +66,16 @@ public class Inventory {
     }
 
     public StackTiles getStackTiles() {
-        FurniDataSearcher.FurniDetails smallStackTile = FurniDataSearcher.getFurniDetailsByClassName("tile_stackmagic", FurniType.FLOOR);
-        FurniDataSearcher.FurniDetails mediumStackTile = FurniDataSearcher.getFurniDetailsByClassName("tile_stackmagic1", FurniType.FLOOR);
-        FurniDataSearcher.FurniDetails largeStackTile = FurniDataSearcher.getFurniDetailsByClassName("tile_stackmagic2", FurniType.FLOOR);
+        List<Integer> stackTileTypeIds = new ArrayList<>();
+        for(String className : new String[] { "tile_stackmagic", "tile_stackmagic1", "tile_stackmagic2" }) {
+            FurniDataSearcher.FurniDetails details = FurniDataSearcher.getFurniDetailsByClassName(className, FurniType.FLOOR);
+            if(details != null) {
+                stackTileTypeIds.add(details.getTypeID());
+            }
+        }
 
-        return new StackTiles(invItems.parallelStream()
-                .filter(invItem -> invItem.getTypeID() == smallStackTile.getTypeID() ||
-                        invItem.getTypeID() == mediumStackTile.getTypeID() ||
-                        invItem.getTypeID() == largeStackTile.getTypeID())
+        return new StackTiles(invItems.stream()
+                .filter(invItem -> stackTileTypeIds.contains(invItem.getTypeID()))
                 .collect(Collectors.toList()));
     }
 
@@ -132,8 +145,11 @@ public class Inventory {
         public InvItem useStackTile(String classname) {
             InvItem tile = usedTiles.keySet().stream()
                     .filter(i -> !usedTiles.get(i))
-                    .filter(i -> tilesDetails.get(i).getClassName().equals(classname))
+                    .filter(i -> tilesDetails.get(i) != null && classname.equals(tilesDetails.get(i).getClassName()))
                     .findFirst().orElse(null);
+            if(tile == null) {
+                return null;
+            }
             usedTiles.replace(tile, true);
             return tile;
         }

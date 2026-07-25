@@ -77,6 +77,10 @@ public class FloorItems extends Exportable {
         this.stackTiles.pickUp(executor);
     }
 
+    protected String stateOf(FloorItem item) {
+        return item == null ? null : item.state;
+    }
+
     protected class FloorItem extends Exportable {
         public String classname, state;
         public int id, typeId, x, y, dir, cat;
@@ -162,9 +166,10 @@ public class FloorItems extends Exportable {
 
                     tries = 0;
                     while(tries < 50
-                            && this.state != null && !this.state.isEmpty()
+                            && this.state != null && !this.state.isEmpty() && !"null".equals(this.state)
                             && currentItem.state != null
-                            && !this.state.equals(currentFloorItems.getFloorItemById(this.newId).state)) {
+                            && stateOf(currentFloorItems.getFloorItemById(this.newId)) != null
+                            && !this.state.equals(stateOf(currentFloorItems.getFloorItemById(this.newId)))) {
                         executor.sendToServer("UseFurniture", this.newId, 0);
                         executor.awaitPacketList(
                                 new Executor.AwaitingPacket("ObjectDataUpdate", HMessage.Direction.TOCLIENT, 150)
@@ -178,10 +183,16 @@ public class FloorItems extends Exportable {
                     }
                 }
 
+                int pickupTries = 0;
                 do {
                     executor.sendToServer("PickupObject", 2, this.newId);
                     Utils.sleep(30);
-                } while(currentFloorItems.getFloorItemById(this.newId) != null);
+                    pickupTries++;
+                } while(currentFloorItems.getFloorItemById(this.newId) != null && pickupTries < 20);
+
+                if(currentFloorItems.getFloorItemById(this.newId) != null) {
+                    Logger.log(Color.ORANGE, this.classname + " could not be picked up again");
+                }
 
                 inventory.removeItemById(this.newId);
             } else {

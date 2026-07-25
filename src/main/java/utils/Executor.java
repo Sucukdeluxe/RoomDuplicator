@@ -251,8 +251,11 @@ public class Executor {
             for(Predicate<? super HPacket> condition : conditions) {
                 HPacket packet = hMessage.getPacket();
                 packet.resetReadIndex();
-                if(condition.test(packet)) {
-                    return true;
+                try {
+                    if(condition.test(packet)) {
+                        return true;
+                    }
+                } catch (Throwable ignored) {
                 }
             }
             return conditions.isEmpty();

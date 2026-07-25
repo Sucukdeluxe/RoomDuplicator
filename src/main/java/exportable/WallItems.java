@@ -26,9 +26,15 @@ public class WallItems extends Exportable {
     public List<WallItem> wallItems = new ArrayList<>();
 
     public WallItems(HPacket objectsPacket) {
-        Arrays.stream(HWallItem.parse(objectsPacket))
-                .map(WallItem::new)
-                .forEach(this.wallItems::add);
+        objectsPacket.resetReadIndex();
+        try {
+            Arrays.stream(HWallItem.parse(objectsPacket))
+                    .map(WallItem::new)
+                    .forEach(this.wallItems::add);
+        } catch (Throwable t) {
+            t.printStackTrace();
+            Logger.log(Color.RED, "Wall items could not be read: " + t);
+        }
     }
 
     public WallItems(JSONArray wallItemsImport) {

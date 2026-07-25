@@ -27,6 +27,10 @@ public class FloorPlan extends Exportable {
         this.doorX = doorPacket.readInteger(6);
         this.doorY = doorPacket.readInteger(10);
         this.doorDir = doorPacket.readInteger(14);
+
+        if(this.floorPlan == null || this.floorPlan.isEmpty()) {
+            throw new IllegalStateException("floorplan packet has an unexpected layout");
+        }
     }
 
     public FloorPlan(JSONObject floorImport) {
@@ -37,18 +41,25 @@ public class FloorPlan extends Exportable {
     }
 
     public Pair<Integer, Integer> getOpenSpot(int minSize) {
+        if(floorPlan == null || floorPlan.isEmpty()) {
+            return new Pair<>(1, 1);
+        }
+
+        int size = Math.max(1, minSize);
         String[] splitFloorPlan = floorPlan.split("\r");
-        for(int y = 0; y < splitFloorPlan.length - minSize; y++) {
-            for(int x = 0; x < splitFloorPlan[y].length() - minSize; x++) {
+        for(int y = 0; y + size <= splitFloorPlan.length; y++) {
+            for(int x = 0; x + size <= splitFloorPlan[y].length(); x++) {
                 if(splitFloorPlan[y].charAt(x) != 'x') {
                     boolean possible = true;
                     char height = splitFloorPlan[y].charAt(x);
-                    for(int i = 0; i < minSize; i++) {
-                        for(int j = 0; j < minSize; j++) {
-                            possible = splitFloorPlan[y + i].charAt(x + j) == height;
-                                if(!possible) break;
+                    for(int i = 0; i < size && possible; i++) {
+                        String row = splitFloorPlan[y + i];
+                        for(int j = 0; j < size; j++) {
+                            if(x + j >= row.length() || row.charAt(x + j) != height) {
+                                possible = false;
+                                break;
+                            }
                         }
-                        if(!possible) break;
                     }
                     if(possible) return new Pair<>(x, y);
                 }

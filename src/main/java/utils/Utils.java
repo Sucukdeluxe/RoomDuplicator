@@ -65,7 +65,11 @@ public class Utils {
 
         if(packetMap.getOrDefault("RoomEntryTile", null) != null
                 && packetMap.getOrDefault("FloorHeightMap", null) != null) {
-            exportables.put("FloorPlan", new LiveFloorPlan(extension, packetMap.get("FloorHeightMap"), packetMap.get("RoomEntryTile")));
+            try {
+                exportables.put("FloorPlan", new LiveFloorPlan(extension, packetMap.get("FloorHeightMap"), packetMap.get("RoomEntryTile")));
+            } catch (Throwable t) {
+                Logger.log(Color.RED, "Floorplan of this room could not be read: " + t);
+            }
         }
 
         if(packetMap.getOrDefault("GetGuestRoomResult", null) != null) {
@@ -119,16 +123,26 @@ public class Utils {
 
     public static Inventory requestInventory(Executor executor) {
         executor.sendToServer("RequestFurniInventory");
-        HPacket received = executor.awaitPacket(new Executor.AwaitingPacket("FurniList", HMessage.Direction.TOCLIENT, 500));
+        HPacket received = executor.awaitPacket(new Executor.AwaitingPacket("FurniList", HMessage.Direction.TOCLIENT, 3000));
         if(received == null) {
-            System.out.println("No Packet received");
+            Logger.log(Color.RED, "No inventory response from the server");
             return null;
         }
-        int packetCount = received.readInteger();
+        int packetCount;
+        try {
+            packetCount = received.readInteger();
+        } catch (Throwable t) {
+            Logger.log(Color.RED, "Unexpected inventory response, import stopped");
+            return null;
+        }
+        if(packetCount < 1 || packetCount > 512) {
+            Logger.log(Color.RED, "Unexpected inventory size (" + packetCount + "), import stopped");
+            return null;
+        }
+
         Executor.AwaitingPacket[] awaitingPackets = new Executor.AwaitingPacket[packetCount];
         for(int i = 0; i < packetCount; i++) {
             int index = i;
-            System.out.println(i);
             awaitingPackets[i] = new Executor.AwaitingPacket("FurniList", HMessage.Direction.TOCLIENT, 5000)
                     .addConditions(packet -> {
                         packet.readInteger();
@@ -137,12 +151,18 @@ public class Utils {
         }
         executor.sendToServer("RequestFurniInventory");
         List<HPacket> invPackets = executor.awaitPacketList(awaitingPackets);
-        if(invPackets == null) {
-            System.out.println("Inventory packets missed");
+        if(invPackets == null || invPackets.stream().noneMatch(Objects::nonNull)) {
+            Logger.log(Color.RED, "Inventory packets missed");
             return null;
         }
 
-        return new Inventory(invPackets.toArray(new HPacket[0]));
+        try {
+            return new Inventory(invPackets.stream().filter(Objects::nonNull).toArray(HPacket[]::new));
+        } catch (Throwable t) {
+            t.printStackTrace();
+            Logger.log(Color.RED, "Could not read inventory: " + t);
+            return null;
+        }
     }
 
     public static void sleep(int millis) {
@@ -163,6 +183,7 @@ public class Utils {
             if(response != null) return;
             tries++;
         }
+        Logger.log(Color.ORANGE, "Could not place floor item " + id + " at " + x + "," + y);
     }
 
     public static void moveObject(Executor executor, int id, int x, int y, int dir) {
@@ -174,6 +195,7 @@ public class Utils {
             if(response != null) return;
             tries++;
         }
+        Logger.log(Color.ORANGE, "Could not move item " + id + " to " + x + "," + y);
     }
 
     public static void placeWallItem(Executor executor, int id, String position) {
@@ -186,5 +208,6 @@ public class Utils {
             if(response != null) return;
             tries++;
         }
+        Logger.log(Color.ORANGE, "Could not place wall item " + id);
     }
 }
