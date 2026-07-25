@@ -23,30 +23,69 @@ public class RoomData extends Exportable {
     public final int id, ownerId, lockType, maxUsers, tradingMode, category, freeflow, chatSize, scrollMethod, chatDistance, floodMode, muteRights, kickRights, banRights, wallThickness, floorThickness;
     public final boolean wallsHidden, allowPets;
 
+    private static final class SafeReader {
+        private final HPacket packet;
+        private int failures = 0;
+
+        SafeReader(HPacket packet) {
+            this.packet = packet;
+        }
+
+        int readInt(int fallback) {
+            if(packet == null) return fallback;
+            try {
+                return packet.readInteger();
+            } catch (Throwable t) {
+                failures++;
+                return fallback;
+            }
+        }
+
+        String readString(String fallback) {
+            if(packet == null) return fallback;
+            try {
+                return packet.readString();
+            } catch (Throwable t) {
+                failures++;
+                return fallback;
+            }
+        }
+
+        boolean readBoolean(boolean fallback) {
+            if(packet == null) return fallback;
+            try {
+                return packet.readBoolean();
+            } catch (Throwable t) {
+                failures++;
+                return fallback;
+            }
+        }
+    }
+
     public RoomData(HPacket roomPacket, HPacket visualizationPacket) {
         roomPacket.setReadIndex(7);
+        SafeReader room = new SafeReader(roomPacket);
 
-        this.id = roomPacket.readInteger();
-        this.name = roomPacket.readString();
-        this.ownerId = roomPacket.readInteger();
-        this.ownerName = roomPacket.readString();
-        this.lockType = roomPacket.readInteger();
+        this.id = room.readInt(0);
+        this.name = room.readString("Unknown");
+        this.ownerId = room.readInt(0);
+        this.ownerName = room.readString("");
+        this.lockType = room.readInt(0);
 
-        roomPacket.readInteger();
+        room.readInt(0);
 
-        this.maxUsers = roomPacket.readInteger();
-        this.description = roomPacket.readString();
-        this.tradingMode = roomPacket.readInteger();
+        this.maxUsers = room.readInt(0);
+        this.description = room.readString("");
+        this.tradingMode = room.readInt(0);
 
-        roomPacket.readInteger();
-        roomPacket.readInteger();
+        room.readInt(0);
+        room.readInt(0);
 
-        this.category = roomPacket.readInteger();
+        this.category = room.readInt(0);
 
-        // Skip all tags
-        int tagCount = roomPacket.readInteger();
-        for(int i = 0; i < tagCount; i ++) {
-            roomPacket.readString();
+        int tagCount = room.readInt(0);
+        for(int i = 0; i < tagCount && i < 64; i ++) {
+            room.readString("");
         }
 
         final int THUMBNAIL_BITMASK = 1;
@@ -56,47 +95,55 @@ public class RoomData extends Exportable {
         final int ALLOWPETS_BITMASK = 16;
         final int DISPLAYROOMENTRYAD_BITMASK = 32;
 
-        int multiUse = roomPacket.readInteger();
+        int multiUse = room.readInt(0);
 
         // skip Official room pic if present
         if((multiUse & THUMBNAIL_BITMASK) > 0) {
-            roomPacket.readString();
+            room.readString("");
         }
 
         // Skip group info if present
         if((multiUse & GROUPDATA_BITMASK) > 0) {
-            roomPacket.readInteger();
-            roomPacket.readString();
-            roomPacket.readString();
+            room.readInt(0);
+            room.readString("");
+            room.readString("");
         }
 
         // Skip event info if present
         if((multiUse & ROOMAD_BITMASK) > 0) {
-            roomPacket.readString();
-            roomPacket.readString();
-            roomPacket.readInteger();
+            room.readString("");
+            room.readString("");
+            room.readInt(0);
         }
 
         this.allowPets = (multiUse & ALLOWPETS_BITMASK) > 0;
 
-        roomPacket.readInteger();
+        room.readInt(0);
 
-        this.muteRights = roomPacket.readInteger();
-        this.kickRights = roomPacket.readInteger();
-        this.banRights = roomPacket.readInteger();
+        this.muteRights = room.readInt(0);
+        this.kickRights = room.readInt(0);
+        this.banRights = room.readInt(0);
 
-        roomPacket.readBoolean();
+        room.readBoolean(false);
 
-        this.freeflow = roomPacket.readInteger();
-        this.chatSize = roomPacket.readInteger();
-        this.scrollMethod = roomPacket.readInteger();
-        this.chatDistance = roomPacket.readInteger();
-        this.floodMode = roomPacket.readInteger();
+        this.freeflow = room.readInt(0);
+        this.chatSize = room.readInt(0);
+        this.scrollMethod = room.readInt(0);
+        this.chatDistance = room.readInt(50);
+        this.floodMode = room.readInt(0);
 
-        visualizationPacket.resetReadIndex();
-        this.wallsHidden = visualizationPacket.readBoolean();
-        this.wallThickness = visualizationPacket.readInteger();
-        this.floorThickness = visualizationPacket.readInteger();
+        if(visualizationPacket != null) {
+            visualizationPacket.resetReadIndex();
+        }
+        SafeReader visualization = new SafeReader(visualizationPacket);
+        this.wallsHidden = visualization.readBoolean(false);
+        this.wallThickness = visualization.readInt(0);
+        this.floorThickness = visualization.readInt(0);
+
+        if(room.failures + visualization.failures > 0) {
+            Logger.log(Color.ORANGE, "Room settings: " + (room.failures + visualization.failures)
+                    + " field(s) missing in this client's packets, defaults used");
+        }
     }
 
     public RoomData(JSONObject roomDataImport) {

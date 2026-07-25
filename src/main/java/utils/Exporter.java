@@ -25,7 +25,7 @@ public class Exporter {
         Map<String, HPacket> packets = Utils.requestRoomEntryPackets(executor);
         System.out.println(packets.toString());
         if(packets.values().stream().noneMatch(Objects::nonNull) || packets.get("GetGuestRoomResult") == null || packets.get("RoomVisualizationSettings") == null) {
-            Logger.log(Color.RED, "Move Habbo in to a room to start an export!");
+            Logger.log(Color.RED, "No room data captured yet - walk out and back in to the room, then export again!");
             return;
         }
 

@@ -6,7 +6,7 @@
 
     <groupId>org.example</groupId>
     <artifactId>RoomDuplicator</artifactId>
-    <version>0.1</version>
+    <version>1.1</version>
 
     <build>
         <resources>
@@ -104,6 +104,37 @@
                     <target>8</target>
                 </configuration>
             </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <version>3.2.4</version>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>shade</goal>
+                        </goals>
+                        <configuration>
+                            <outputFile>${project.build.directory}/bin/RoomDuplicator.jar</outputFile>
+                            <filters>
+                                <filter>
+                                    <artifact>*:*</artifact>
+                                    <excludes>
+                                        <exclude>META-INF/*.SF</exclude>
+                                        <exclude>META-INF/*.DSA</exclude>
+                                        <exclude>META-INF/*.RSA</exclude>
+                                    </excludes>
+                                </filter>
+                            </filters>
+                            <transformers>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                                    <mainClass>extension.RoomDuplicatorLauncher</mainClass>
+                                </transformer>
+                            </transformers>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
         </plugins>
     </build>
 
@@ -115,8 +146,14 @@
     <dependencies>
         <dependency>
             <groupId>G-Earth</groupId>
-            <artifactId>G-Earth-Native-Extension</artifactId>
-            <version>1.5.0</version>
+            <artifactId>G-Earth</artifactId>
+            <version>1.5.3</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>*</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <dependency>
             <groupId>org.json</groupId>

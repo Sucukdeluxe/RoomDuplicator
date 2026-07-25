@@ -10,21 +10,44 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 public class Executor {
-    private final PacketInfoManager packetInfoManager;
+    private static final Set<String> ROOM_PACKET_NAMES = new HashSet<>(Arrays.asList(
+            "getguestroomresult", "roomentrytile", "floorheightmap", "items", "objects", "roomvisualizationsettings"));
+    private static final String[] NAME_SUFFIXES = { "messagecomposer", "messageevent", "composer", "event" };
+
     private final ExtensionBase extension;
     private final List<AwaitingPacket> awaitingPackets = new ArrayList<>();
+    private final Map<String, HPacket> roomPacketCache = new HashMap<>();
     private final Object lock = new Object();
 
     public Executor(ExtensionBase extension) {
-        packetInfoManager = extension.getPacketInfoManager();
         this.extension = extension;
 
         extension.intercept(HMessage.Direction.TOSERVER, this::onMessageToServer);
         extension.intercept(HMessage.Direction.TOCLIENT, this::onMessageToClient);
     }
 
-    public void sendToServer(String hashOrName, Object... objects) {
-        extension.sendToServer(new HPacket(hashOrName, HMessage.Direction.TOSERVER, objects));
+    private PacketInfoManager packetInfoManager() {
+        return extension.getPacketInfoManager();
+    }
+
+    public boolean isKnownName(HMessage.Direction direction, String name) {
+        return packetInfoManager().getPacketInfoFromName(direction, name) != null;
+    }
+
+    public boolean sendToServer(String hashOrName, Object... objects) {
+        if(!isKnownName(HMessage.Direction.TOSERVER, hashOrName)) {
+            return false;
+        }
+        return extension.sendToServer(new HPacket(hashOrName, HMessage.Direction.TOSERVER, objects));
+    }
+
+    public String sendFirstKnown(String... names) {
+        for(String name : names) {
+            if(sendToServer(name)) {
+                return name;
+            }
+        }
+        return null;
     }
 
     public void sendToClient(String hashOrName, Object... objects) {
@@ -32,14 +55,14 @@ public class Executor {
     }
 
     private void onMessageToServer(HMessage hMessage) {
-        PacketInfo info = packetInfoManager.getPacketInfoFromHeaderId(HMessage.Direction.TOSERVER, hMessage.getPacket().headerId());
+        PacketInfo info = packetInfoManager().getPacketInfoFromHeaderId(HMessage.Direction.TOSERVER, hMessage.getPacket().headerId());
         if(info == null) {
             return;
         }
         synchronized(lock) {
             awaitingPackets.stream()
                     .filter(packet -> packet.direction.equals(HMessage.Direction.TOSERVER)) // Filter TOSERVER packets
-                    .filter(packet -> packet.headerName.equals(info.getName()))             // Filter to packets with matching headernames
+                    .filter(packet -> namesMatch(packet.headerName, info.getName()))        // Filter to packets with matching headernames
                     .forEach(packet -> {
                         if(packet.test(hMessage)) {
                             packet.setPacket(hMessage.getPacket());
@@ -48,15 +71,69 @@ public class Executor {
         }
     }
 
+    public static String normalizeName(String name) {
+        if(name == null) return "";
+        String normalized = name.toLowerCase(Locale.ROOT);
+        for(String suffix : NAME_SUFFIXES) {
+            if(normalized.endsWith(suffix)) {
+                return normalized.substring(0, normalized.length() - suffix.length());
+            }
+        }
+        return normalized;
+    }
+
+    private static boolean namesMatch(String expected, String actual) {
+        return normalizeName(expected).equals(normalizeName(actual));
+    }
+
+    public HPacket getCachedRoomPacket(String headerName) {
+        synchronized(lock) {
+            HPacket cached = roomPacketCache.get(normalizeName(headerName));
+            if(cached == null) return null;
+            HPacket copy = new HPacket(cached);
+            copy.resetReadIndex();
+            return copy;
+        }
+    }
+
+    public int cachedRoomPacketCount() {
+        synchronized(lock) {
+            return roomPacketCache.size();
+        }
+    }
+
+    private void cacheRoomPacket(String name, HPacket packet) {
+        String normalized = normalizeName(name);
+        if(!ROOM_PACKET_NAMES.contains(normalized)) return;
+
+        HPacket copy = new HPacket(packet);
+        copy.resetReadIndex();
+        if(normalized.equals("getguestroomresult") && !readsEnteredRoomFlag(copy)) return;
+        copy.resetReadIndex();
+
+        synchronized(lock) {
+            roomPacketCache.put(normalized, copy);
+        }
+    }
+
+    private static boolean readsEnteredRoomFlag(HPacket packet) {
+        try {
+            return packet.readBoolean();
+        } catch (Throwable t) {
+            return true;
+        }
+    }
+
     private void onMessageToClient(HMessage hMessage) {
-        PacketInfo info = packetInfoManager.getPacketInfoFromHeaderId(HMessage.Direction.TOCLIENT, hMessage.getPacket().headerId());
+        PacketInfo info = packetInfoManager().getPacketInfoFromHeaderId(HMessage.Direction.TOCLIENT, hMessage.getPacket().headerId());
         if(info == null) {
             return;
         }
+        cacheRoomPacket(info.getName(), hMessage.getPacket());
         synchronized(lock) {
             awaitingPackets.stream()
                     .filter(packet -> packet.direction.equals(HMessage.Direction.TOCLIENT)) // Filter TOCLIENT packets
-                    .filter(packet -> packet.headerName.equals(info.getName()))             // Filter to packets with matching headernames
+                    .filter(packet -> namesMatch(packet.headerName, info.getName()))        // Filter to packets with matching headernames
                     .forEach(packet -> {
                         if (packet.test(hMessage)) {
                             packet.setPacket(hMessage.getPacket());
@@ -65,10 +142,18 @@ public class Executor {
         }
     }
 
-    public HPacket awaitPacket(AwaitingPacket... packets) {
+    public void register(AwaitingPacket... packets) {
         synchronized(lock) {
-            this.awaitingPackets.addAll(Arrays.asList(packets));
+            for(AwaitingPacket packet : packets) {
+                if(!awaitingPackets.contains(packet)) {
+                    awaitingPackets.add(packet);
+                }
+            }
         }
+    }
+
+    public HPacket awaitPacket(AwaitingPacket... packets) {
+        register(packets);
 
         while (true) {
             for (AwaitingPacket awaitingPacket : packets) {
@@ -79,6 +164,15 @@ public class Executor {
                     return awaitingPacket.getPacket();
                 }
             }
+            idle();
+        }
+    }
+
+    private static void idle() {
+        try {
+            Thread.sleep(5);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
     }
 
@@ -89,9 +183,7 @@ public class Executor {
     }
 
     public List<HPacket> awaitPacketList(AwaitingPacket... packets) {
-        synchronized (lock) {
-            this.awaitingPackets.addAll(Arrays.asList(packets));
-        }
+        register(packets);
 
         while(true) {
             if(Arrays.stream(packets).allMatch(AwaitingPacket::isReady)) {
@@ -100,6 +192,7 @@ public class Executor {
                 }
                 return Arrays.stream(packets).map(AwaitingPacket::getPacket).collect(Collectors.toList());
             }
+            idle();
         }
     }
 

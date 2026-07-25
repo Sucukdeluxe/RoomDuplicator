@@ -17,7 +17,7 @@ import utils.Logger;
 @ExtensionInfo(
     Title =         "RoomDuplicator",
     Description =   "For duplicating rooms",
-    Version =       "1.0",
+    Version =       "1.1",
     Author =        "WiredSpast & Kouris"
 )
 public class RoomDuplicator extends ExtensionForm {
@@ -67,8 +67,14 @@ public class RoomDuplicator extends ExtensionForm {
 
     public void startExport(ActionEvent actionEvent) {
         exportPane.setDisable(true);
-        exporter.runExport();
-        exportPane.setDisable(false);
+        try {
+            exporter.runExport();
+        } catch (Throwable t) {
+            t.printStackTrace();
+            Logger.log(javafx.scene.paint.Color.RED, "Export failed: " + t);
+        } finally {
+            exportPane.setDisable(false);
+        }
     }
 
     public void startImport(ActionEvent actionEvent) {

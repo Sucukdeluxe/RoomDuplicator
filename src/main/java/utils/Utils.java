@@ -12,6 +12,7 @@ import javafx.event.ActionEvent;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
+import javafx.scene.paint.Color;
 import javafx.stage.StageStyle;
 import parsers.Inventory;
 
@@ -21,23 +22,40 @@ import java.util.concurrent.FutureTask;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public class Utils {
-    public static Map<String, HPacket> requestRoomEntryPackets(Executor executor) {
-        executor.sendToServer("GetHeightMap");
-        Executor.AwaitingPacket[] awaitingPackets = new Executor.AwaitingPacket[] {
-                new Executor.AwaitingPacket("GetGuestRoomResult", HMessage.Direction.TOCLIENT, 500)
-                        .addConditions(HPacket::readBoolean),
-                new Executor.AwaitingPacket("RoomEntryTile", HMessage.Direction.TOCLIENT, 500),
-                new Executor.AwaitingPacket("FloorHeightMap", HMessage.Direction.TOCLIENT, 500),
-                new Executor.AwaitingPacket("Items", HMessage.Direction.TOCLIENT, 500),
-                new Executor.AwaitingPacket("Objects", HMessage.Direction.TOCLIENT, 500),
-                new Executor.AwaitingPacket("RoomVisualizationSettings", HMessage.Direction.TOCLIENT, 500)
-        };
+    private static final String[] ROOM_ENTRY_PACKETS = {
+            "GetGuestRoomResult", "RoomEntryTile", "FloorHeightMap",
+            "Items", "Objects", "RoomVisualizationSettings"
+    };
 
+    public static Map<String, HPacket> requestRoomEntryPackets(Executor executor) {
+        Map<String, HPacket> packetMap = new HashMap<>();
+        for(String name : ROOM_ENTRY_PACKETS) {
+            packetMap.put(name, executor.getCachedRoomPacket(name));
+        }
+
+        if(packetMap.values().stream().allMatch(Objects::nonNull)) {
+            return packetMap;
+        }
+
+        Executor.AwaitingPacket[] awaitingPackets = Arrays.stream(ROOM_ENTRY_PACKETS)
+                .map(name -> new Executor.AwaitingPacket(name, HMessage.Direction.TOCLIENT, 3000))
+                .toArray(Executor.AwaitingPacket[]::new);
+        executor.register(awaitingPackets);
+
+        if(executor.sendFirstKnown("GetHeightMap", "GetRoomEntryTile", "GetHeightMapMessageComposer") == null) {
+            Logger.log(Color.ORANGE, "This client has no room-refresh request - relying on captured room data");
+        }
         executor.awaitPacketList(awaitingPackets);
 
-        Map<String, HPacket> packetMap = new HashMap<>();
-        Arrays.stream(awaitingPackets).forEach(p ->
-                packetMap.put(p.headerName, p.getPacket()));
+        Arrays.stream(awaitingPackets)
+                .filter(p -> p.getPacket() != null)
+                .forEach(p -> packetMap.put(p.headerName, p.getPacket()));
+
+        for(String name : ROOM_ENTRY_PACKETS) {
+            if(packetMap.get(name) == null) {
+                packetMap.put(name, executor.getCachedRoomPacket(name));
+            }
+        }
 
         return packetMap;
     }
