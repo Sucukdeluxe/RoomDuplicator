@@ -61,6 +61,21 @@ public class RoomDuplicator extends ExtensionForm {
         });
     }
 
+    @Override
+    public void intercept(gearth.protocol.HMessage.Direction direction, gearth.extensions.ExtensionBase.MessageListener messageListener) {
+        super.intercept(direction, utils.InterceptGuard.guard(messageListener));
+    }
+
+    @Override
+    public void intercept(gearth.protocol.HMessage.Direction direction, String headerName, gearth.extensions.ExtensionBase.MessageListener messageListener) {
+        super.intercept(direction, headerName, utils.InterceptGuard.guard(messageListener));
+    }
+
+    @Override
+    public void intercept(gearth.protocol.HMessage.Direction direction, int headerId, gearth.extensions.ExtensionBase.MessageListener messageListener) {
+        super.intercept(direction, headerId, utils.InterceptGuard.guard(messageListener));
+    }
+
     public Stage getPrimaryStage() {
         return this.primaryStage;
     }
